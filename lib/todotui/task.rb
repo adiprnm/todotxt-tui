@@ -46,20 +46,31 @@ module Todotui
       match ? parse_completed(match[1]) : parse_open(text)
     end
 
+    # Note: the prefix helpers return [rest, value] and we assign the value
+    # to the task in a separate statement. Spinel drops the setter half of a
+    # chained `rest, task.attr = helper(...)`, which silently loses priority
+    # and dates when reading a file in a compiled binary.
     def self.parse_completed(rest)
       task = new(completed: true)
-      rest, task.completion_date = take_date(rest)
-      rest, task.creation_date = take_date(rest) if task.completion_date
-      rest, task.priority = take_priority(rest)
-      task.body = rest.strip
+      text, completion = take_date(rest)
+      task.completion_date = completion
+      if task.completion_date
+        text, creation = take_date(text)
+        task.creation_date = creation
+      end
+      text, priority = take_priority(text)
+      task.priority = priority
+      task.body = text.strip
       task
     end
 
     def self.parse_open(text)
       task = new
-      text, task.priority = take_priority(text)
-      text, task.creation_date = take_date(text)
-      task.body = text.strip
+      rest, priority = take_priority(text)
+      task.priority = priority
+      rest, creation = take_date(rest)
+      task.creation_date = creation
+      task.body = rest.strip
       task
     end
 

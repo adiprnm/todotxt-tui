@@ -104,8 +104,11 @@ The toolkit needs a few small patches to compile under Spinel — the
   statically known IO, so a dynamic sink lost interactive output).
 
 todotui carries its own part: calendar math goes through
-`Todotui::Calendar` (Spinel has no `date` stdlib) and the entry point is
-`bin/todotui.spinel.rb` rather than the Bundler wrapper.
+`Todotui::Calendar` (Spinel has no `date` stdlib), `Task.parse` assigns each
+prefix field with a separate statement (Spinel drops the setter half of a
+chained `rest, task.attr = helper(...)`, which used to lose priorities and
+dates when reading a file), and the entry point is `bin/todotui.spinel.rb`
+rather than the Bundler wrapper.
 
 ## Where todo.txt lives
 
