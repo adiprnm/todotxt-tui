@@ -19,4 +19,15 @@ task :spinel do
   sh "spinel bin/todotui.spinel.rb -o #{ENV['OUT'] || 'tt'} -I lib -I #{ruby_tui}"
 end
 
+desc 'Build and install the tt native binary to BINDIR (default ~/.local/bin)'
+task install: :spinel do
+  bindir = ENV['BINDIR'] || File.join(Dir.home, '.local', 'bin')
+  FileUtils.mkdir_p(bindir)
+  dest = File.join(bindir, 'tt')
+  # Remove first: a symlink would otherwise make install write through it.
+  FileUtils.rm_f(dest) if File.symlink?(dest)
+  FileUtils.install(ENV['OUT'] || 'tt', dest, mode: 0o755)
+  puts "installed #{dest}"
+end
+
 task default: :test

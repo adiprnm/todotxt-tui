@@ -59,10 +59,11 @@ where you call it from:
 
 ```sh
 ln -s "$(pwd)/bin/todotui" ~/.local/bin/todotui
-ln -s "$(pwd)/bin/todotui" ~/.local/bin/tt        # short alias
 cd /tmp && todotui
-cd /tmp && tt
 ```
+
+The short `tt` command is the standalone native binary; install it with
+`rake install` (see [Standalone binary](#standalone-binary-spinel)).
 
 ## Standalone binary (Spinel)
 
@@ -77,6 +78,15 @@ spinel bin/todotui.spinel.rb -o tt -I lib -I /path/to/ruby-tui/lib
 
 or, from the checkout, `rake spinel` (it looks for a sibling
 `../ruby-tui`; override with `RUBY_TUI_LIB=...`, rename with `OUT=...`).
+
+`rake install` builds the binary and copies it to `~/.local/bin/tt` (override
+with `BINDIR=...`), so `tt` is a standalone native command on your `$PATH` —
+no Ruby or gems required at run time:
+
+```sh
+rake install
+cd /tmp && tt --snapshot --demo
+```
 
 The toolkit needs a few small patches to compile under Spinel — the
 `lib/tui` sources in the `ruby-tui` checkout already carry them:
