@@ -2,10 +2,11 @@
 
 # A plain runnable script as well: ruby todotui.rb [options]
 
-ENV['BUNDLE_GEMFILE'] ||= File.expand_path('Gemfile', __dir__)
+root = File.dirname(File.realpath(__FILE__))
+ENV['BUNDLE_GEMFILE'] ||= File.join(root, 'Gemfile')
 require 'bundler/setup'
 
-$LOAD_PATH.unshift(File.expand_path('lib', __dir__))
+$LOAD_PATH.unshift(File.join(root, 'lib'))
 require 'todotui'
 
 Todotui::CLI.run(ARGV)

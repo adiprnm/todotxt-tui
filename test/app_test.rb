@@ -201,4 +201,54 @@ class AppTest < Minitest::Test
                       'the list behind the modal cannot take the focus'
     end
   end
+
+  def test_archiving_uses_the_configured_done_file
+    Dir.mktmpdir('todotui') do |dir|
+      file = File.join(dir, 'todo.txt')
+      File.write(file, "open one\nx 2024-04-01 done two\n")
+      done = File.join(dir, 'archive', 'finished.txt')
+      config = Todotui::Config.new(path: File.join(dir, 'config'))
+      config.done_file = done
+      app = Todotui::App.new(config: config, file: file)
+
+      app.archive_done
+
+      assert_equal done, app.store.done_path
+      assert_includes File.read(done), 'done two'
+      refute File.exist?(File.join(dir, 'done.txt')), 'no sibling archive is written'
+    end
+  end
+
+  def test_settings_save_the_done_file
+    Dir.mktmpdir('todotui') do |dir|
+      app = app_with(dir)
+      other_done = File.join(dir, 'archive', 'finished.txt')
+      app.open_settings
+      app.save_settings(todo_file: app.file_path, done_file: other_done)
+
+      assert_equal other_done, app.store.done_path
+      assert_includes File.read(app.config.path), "done_file=#{other_done}"
+    end
+  end
+
+  def test_every_priority_gets_a_distinct_colour
+    colors = ('A'..'Z').map { |letter| Todotui::TaskTable.priority_style(letter) }
+
+    assert_equal 26, colors.uniq.length
+    assert_equal :text, Todotui::TaskTable.priority_style(nil)
+  end
+
+  def test_the_priority_colour_tints_the_whole_row
+    Dir.mktmpdir('todotui') do |dir|
+      app = app_with(dir, ['(A) first task', '(B) second task'])
+      ui = TUI::App.new(app.root, out: StringIO.new, size: [100, 30])
+      app.attach(ui)
+      app.resize(100, 30)
+      line = ui.render_lines.find { |l| l.include?('second task') }
+
+      color = Todotui::TaskTable.priority_style('B')
+      assert_includes line, "#{color}(B)", 'the priority badge is tinted'
+      assert_includes line, "#{color}second task", 'the task text is tinted too'
+    end
+  end
 end

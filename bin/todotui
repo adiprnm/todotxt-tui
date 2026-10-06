@@ -2,11 +2,15 @@
 # frozen_string_literal: true
 
 # Run the app from a checkout: bin/todotui [--file=...] [--snapshot]
+#
+# __FILE__ is resolved through symlinks so the script also works when it is
+# linked onto $PATH (e.g. ln -s .../bin/todotui ~/.local/bin/todotui).
 
-ENV['BUNDLE_GEMFILE'] ||= File.expand_path('../Gemfile', __dir__)
+root = File.expand_path('..', File.dirname(File.realpath(__FILE__)))
+ENV['BUNDLE_GEMFILE'] ||= File.join(root, 'Gemfile')
 require 'bundler/setup'
 
-$LOAD_PATH.unshift(File.expand_path('../lib', __dir__))
+$LOAD_PATH.unshift(File.join(root, 'lib'))
 require 'todotui'
 
 Todotui::CLI.run(ARGV)

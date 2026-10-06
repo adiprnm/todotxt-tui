@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
-require 'date'
 require 'ruby-tui'
 
 require_relative 'task'
 require_relative 'store'
 require_relative 'config'
 require_relative 'query'
+require_relative 'table'
 
 module Todotui
   # The application widget tree and its behaviour. All of the todo.txt
@@ -31,9 +31,10 @@ module Todotui
 
     attr_reader :root, :tasks, :config, :store
 
-    def initialize(config: Config.new, file: nil)
+    def initialize(config: Config.new, file: nil, done_file: nil)
       @config = config
-      @store = Store.new(@config.resolve(file))
+      todo = @config.resolve(file)
+      @store = Store.new(todo, done_path: @config.resolve_done(done_file, todo: todo))
       @tasks = []
 
       @filter = ''
@@ -116,7 +117,7 @@ module Todotui
       columns = TUI::Layout::Stack.new(direction: :horizontal)
 
       @table_box = TUI::Layout::Box.new(title: 'Tasks')
-      @table = TUI::Table.new(columns: columns_for(120))
+      @table = TaskTable.new(columns: columns_for(120))
       @table.on(TUI::Events::CHANGE) { |row, _i| show_details(row && row[:task]) }
       @table.on(TUI::Events::SELECT) { |row, _i| open_editor(row[:task]) if row }
       @table_box.add(@table)
@@ -178,9 +179,9 @@ module Todotui
       stack = TUI::Layout::Stack.new(direction: :vertical)
 
       @editor_form = TUI::Form.new(label_width: 9)
+      @f_body = @editor_form.text(:body, 'Task', required: true, width: 62)
       @f_priority = @editor_form.text(:priority, 'Priority', placeholder: 'A-Z',
                                       width: 8, validate: method(:validate_priority))
-      @f_body = @editor_form.text(:body, 'Task', required: true, width: 62)
       @f_due = @editor_form.text(:due, 'Due', placeholder: 'YYYY-MM-DD',
                                  width: 14, validate: method(:validate_due))
       @f_body.editor.on(TUI::Events::CHANGE) { refresh_preview }
@@ -209,6 +210,7 @@ module Todotui
 
       @settings_form = TUI::Form.new(label_width: 12)
       @f_file = @settings_form.text(:todo_file, 'todo.txt', required: true, width: 64)
+      @f_done = @settings_form.text(:done_file, 'done.txt', required: true, width: 64)
       @settings_form.button('Save')
       @settings_form.on(TUI::Events::SUBMIT) { |values| save_settings(values) }
 
@@ -216,18 +218,18 @@ module Todotui
       @settings_config = TUI::Label.new('', style: :value, wrap: true)
       @settings_saved = TUI::Label.new('', style: :value, wrap: true)
       @settings_hint = TUI::Label.new(
-        'Saving writes the path above to the config, so the next launch opens it.',
+        'Saving writes both paths to the config, so the next launch opens them.',
         style: :muted, wrap: true
       )
 
       stack.add(@settings_form, size: TUI.auto)
       stack.add(TUI::Label.new(''), size: TUI.fixed(1))
-      stack.add(TUI::Label.new('Current file', style: :label), size: TUI.auto)
+      stack.add(TUI::Label.new('Current todo.txt', style: :label), size: TUI.auto)
       stack.add(@settings_current, size: TUI.auto)
       stack.add(TUI::Label.new(''), size: TUI.fixed(1))
       stack.add(TUI::Label.new('Config file', style: :label), size: TUI.auto)
       stack.add(@settings_config, size: TUI.auto)
-      stack.add(TUI::Label.new('Saved todo_file', style: :label), size: TUI.auto)
+      stack.add(TUI::Label.new('Saved paths', style: :label), size: TUI.auto)
       stack.add(@settings_saved, size: TUI.auto)
       stack.add(TUI::Label.new(''), size: TUI.fixed(1))
       stack.add(@settings_hint, size: TUI.auto)
@@ -242,14 +244,14 @@ module Todotui
       clear_undo
       @editing = task
       @editor_box.title = task ? 'Edit task' : 'New task'
-      @f_priority.editor.value = task ? task.priority.to_s : ''
       @f_body.editor.value = task ? task.body : ''
+      @f_priority.editor.value = task ? task.priority.to_s : ''
       @f_due.editor.value = task ? task.due_date.to_s : ''
       @editor_form.fields.each { |field| field.error = nil }
       refresh_preview
 
       show_overlay(0, HINTS[:editor])
-      @ui.focus(@f_priority.editor) if @ui
+      @ui.focus(@f_body.editor) if @ui
       self
     end
 
@@ -263,7 +265,7 @@ module Todotui
         flash("Updated: #{@editing.summary}")
       else
         task = Task.new(priority: priority.empty? ? nil : priority,
-                        creation_date: Date.today.to_s, body: body)
+                        creation_date: Calendar.today, body: body)
         @tasks << task
         flash("Added: #{task.summary}")
       end
@@ -278,9 +280,10 @@ module Todotui
     def open_settings
       clear_undo
       @f_file.editor.value = @store.path
-      @settings_current.text = @store.path
+      @f_done.editor.value = @store.done_path || @config.resolve_done(todo: @store.path)
+      @settings_current.text = "#{@store.path}  |  #{@store.done_path || @config.resolve_done(todo: @store.path)}"
       @settings_config.text = @config.path
-      @settings_saved.text = @config.todo_file
+      @settings_saved.text = @config.done_file ? @config.done_file : '(done.txt next to todo.txt)'
       @settings_form.fields.each { |field| field.error = nil }
 
       show_overlay(1, HINTS[:settings])
@@ -290,10 +293,14 @@ module Todotui
 
     def save_settings(values)
       path = File.expand_path(values[:todo_file].to_s.strip)
+      done_value = values[:done_file].to_s.strip
+      done = done_value.empty? ? @config.resolve_done(todo: path) : File.expand_path(done_value)
+
       @config.todo_file = path
+      @config.done_file = done
       @config.save
 
-      @store = Store.new(path)
+      @store = Store.new(path, done_path: done)
       loaded = reload_tasks
       @filter = ''
       @search.value = ''
@@ -327,7 +334,7 @@ module Todotui
 
       clear_undo
       task.completed = !task.completed
-      task.completion_date = task.completed ? Date.today.to_s : nil
+      task.completion_date = task.completed ? Calendar.today : nil
       persist
       refresh
       flash(task.completed ? "Completed: #{task.summary}" : "Reopened: #{task.summary}")
@@ -374,7 +381,7 @@ module Todotui
       @tasks -= done
       persist
       refresh
-      flash("Archived #{count} task(s) to done.txt")
+      flash("Archived #{count} task(s) to #{@store.done_path || 'done.txt'}")
       self
     end
 
@@ -400,8 +407,8 @@ module Todotui
     # today so the frame always looks alive.
     def demo!
       @demo = true
-      today = Date.today
-      day = ->(offset) { (today + offset).to_s }
+      today = Calendar.today
+      day = ->(offset) { Calendar.offset(offset) }
       @tasks = [
         Task.new(priority: 'A', creation_date: day.call(-9),
                  body: "Pay the electricity bill +home due:#{day.call(2)}"),
@@ -460,6 +467,7 @@ module Todotui
       @details[:line].text = task.to_s
       @details[:status].text = task.completed ? 'completed' : 'open'
       @details[:priority].text = task.priority ? "(#{task.priority})" : '—'
+      @details[:priority].style = task.priority ? TaskTable.priority_style(task.priority) : :value
       @details[:created].text = task.creation_date || '—'
       @details[:completed].text = task.completion_date || '—'
       @details[:due].text = due_detail(task)
@@ -509,7 +517,7 @@ module Todotui
 
       match = /\A(\d{4})-(\d{2})-(\d{2})\z/.match(text)
       return 'use YYYY-MM-DD' unless match
-      return true if Date.valid_date?(match[1].to_i, match[2].to_i, match[3].to_i)
+      return true if Calendar.valid?(match[1].to_i, match[2].to_i, match[3].to_i)
 
       'no such date'
     end
@@ -526,7 +534,7 @@ module Todotui
       task = Task.new(priority: priority.empty? ? nil : priority,
                       completed: @editing ? @editing.completed : false,
                       completion_date: @editing && @editing.completion_date,
-                      creation_date: @editing ? @editing.creation_date : Date.today.to_s,
+                      creation_date: @editing ? @editing.creation_date : Calendar.today,
                       body: apply_due(@f_body.editor.value, @f_due.editor.value))
       @preview.text = "  #{task}"
     end
@@ -546,7 +554,7 @@ module Todotui
       return '—' unless due
       return due if task.completed
 
-      days = (Date.strptime(due, '%Y-%m-%d') - Date.today).to_i
+      days = Calendar.days_between(due, Calendar.today)
       label = if days.negative? then "#{-days}d overdue"
               elsif days.zero? then 'today'
               else "in #{days}d"

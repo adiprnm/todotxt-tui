@@ -6,6 +6,7 @@ require 'bundler/setup'
 require 'minitest/autorun'
 require 'stringio'
 require 'tmpdir'
+require 'date'
 
 $LOAD_PATH.unshift(File.expand_path('../lib', __dir__))
 require 'todotui'

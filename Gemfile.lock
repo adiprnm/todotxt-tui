@@ -1,6 +1,6 @@
 GIT
   remote: https://github.com/adiprnm/ruby-tui.git
-  revision: b3e28fb2f250e464b9ffe9228ea36b8673e93c0a
+  revision: d054dd8b06981018dc5ce0977eac7fde5eae5c0b
   specs:
     ruby-tui (0.1.0)
 

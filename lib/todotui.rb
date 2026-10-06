@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'todotui/version'
+require_relative 'todotui/calendar'
 require_relative 'todotui/task'
 require_relative 'todotui/store'
 require_relative 'todotui/config'

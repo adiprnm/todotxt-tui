@@ -51,12 +51,26 @@ class StoreTest < Minitest::Test
       refute_includes done, 'Open one'
     end
   end
+
+  def test_archive_writes_to_a_configured_done_file
+    Dir.mktmpdir('todotui') do |dir|
+      done_path = File.join(dir, 'archive', 'finished.txt')
+      store = Todotui::Store.new(File.join(dir, 'todo.txt'), done_path: done_path)
+      assert_equal done_path, store.done_path
+
+      store.archive([Todotui::Task.new(completed: true, completion_date: '2024-05-01',
+                                       body: 'Done one')])
+
+      assert_includes File.read(done_path), 'Done one'
+      refute File.exist?(File.join(dir, 'done.txt')), 'the sibling file is not touched'
+    end
+  end
 end
 
 class ConfigTest < Minitest::Test
   include TestHelpers
 
-  ENV_KEYS = Todotui::Config::ENV_KEYS
+  ENV_KEYS = (Todotui::Config::ENV_KEYS + Todotui::Config::DONE_ENV_KEYS).freeze
 
   def with_clean_env
     saved = ENV_KEYS.to_h { |key| [key, ENV[key]] }
@@ -74,6 +88,35 @@ class ConfigTest < Minitest::Test
 
       reloaded = Todotui::Config.new(path: File.join(dir, 'config'))
       assert_equal File.join(dir, 'work.txt'), reloaded.todo_file
+    end
+  end
+
+  def test_saves_and_reloads_the_done_file
+    Dir.mktmpdir('todotui') do |dir|
+      config = Todotui::Config.new(path: File.join(dir, 'config'))
+      config.todo_file = File.join(dir, 'work.txt')
+      config.done_file = File.join(dir, 'archive', 'finished.txt')
+      config.save
+
+      reloaded = Todotui::Config.new(path: File.join(dir, 'config'))
+      assert_equal File.join(dir, 'archive', 'finished.txt'), reloaded.done_file
+      assert_equal reloaded.done_file, reloaded.resolve_done
+    end
+  end
+
+  def test_resolve_done_defaults_to_done_txt_next_to_todo
+    Dir.mktmpdir('todotui') do |dir|
+      config = Todotui::Config.new(path: File.join(dir, 'config'))
+      todo = File.join(dir, 'work', 'todo.txt')
+
+      with_clean_env do
+        assert_equal File.join(dir, 'work', 'done.txt'), config.resolve_done(todo: todo)
+        assert_equal File.join(dir, 'explicit-done.txt'),
+                     config.resolve_done(File.join(dir, 'explicit-done.txt'), todo: todo)
+
+        ENV['TODOTXT_DONE_FILE'] = File.join(dir, 'env-done.txt')
+        assert_equal File.join(dir, 'env-done.txt'), config.resolve_done(todo: todo)
+      end
     end
   end
 
@@ -95,8 +138,24 @@ class ConfigTest < Minitest::Test
     end
   end
 
+  def test_generic_todo_file_env_is_ignored
+    Dir.mktmpdir('todotui') do |dir|
+      config = Todotui::Config.new(path: File.join(dir, 'config'))
+      config.todo_file = File.join(dir, 'from-config.txt')
+      saved = ENV['TODO_FILE']
+      ENV['TODO_FILE'] = File.join(dir, 'from-generic-env.txt')
+
+      assert_equal File.join(dir, 'from-config.txt'), config.resolve,
+                   'a generic TODO_FILE must not override the config'
+    ensure
+      saved.nil? ? ENV.delete('TODO_FILE') : ENV['TODO_FILE'] = saved
+    end
+  end
+
   def test_defaults
     assert_equal File.join(Dir.home, 'todo.txt'), Todotui::Config.default_todo_file
+    assert_equal File.join(Dir.home, 'done.txt'), Todotui::Config.default_done_file
     assert_equal 'todo.txt', Todotui::Config::FILENAME
+    assert_equal 'done.txt', Todotui::Config::DONE_FILENAME
   end
 end

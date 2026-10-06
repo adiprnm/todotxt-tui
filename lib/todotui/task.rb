@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require 'date'
+require_relative 'calendar'
 
 module Todotui
   # A single line of a todo.txt file, parsed into its fields.
@@ -108,13 +108,13 @@ module Todotui
     end
 
     def today?
-      due_date == Date.today.to_s
+      due_date == Calendar.today
     end
 
     def overdue?
       return false if @completed || due_date.nil?
 
-      due_date < Date.today.to_s
+      due_date < Calendar.today
     end
 
     def summary

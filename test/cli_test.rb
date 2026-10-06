@@ -49,7 +49,7 @@ class CliTest < Minitest::Test
         end
 
         sleep 1.2
-        ['a', "\t", 'p', 'i', 'n', 'g', ' ', 'h', 'o', 'm', 'e', "\r", 'q'].each do |key|
+        ['a', 'p', 'i', 'n', 'g', ' ', 'h', 'o', 'm', 'e', "\r", 'q'].each do |key|
           writer.print(key)
           writer.flush
           sleep 0.2

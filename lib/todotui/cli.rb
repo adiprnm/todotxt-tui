@@ -20,6 +20,7 @@ module Todotui
 
       options:
         --file=PATH        todo.txt to open (beats the env vars and the config)
+        --done-file=PATH   done.txt archive (default: next to todo.txt)
         --config=PATH      config file to use (default ~/.config/todotui/config)
         --snapshot         render one frame and exit, no terminal needed
         --demo             fill the frame with example tasks (never saved)
@@ -28,7 +29,9 @@ module Todotui
         -h, --help         show this help
 
       environment:
-        TODOTXT_FILE / TODO_FILE / TODO_TXT   path to todo.txt
+        TODOTXT_FILE        path to todo.txt (namespaced on purpose:
+                            TODO_FILE is used by other todo.txt tools)
+        TODOTXT_DONE_FILE   path to done.txt
 
       keys:
         a add · space complete · enter edit · d delete · u undo
@@ -41,7 +44,7 @@ module Todotui
         TUI::Theme.install(options[:theme]) if options[:theme]
 
         config = Config.new(path: options[:config] || Config.default_path)
-        app = App.new(config: config, file: options[:file])
+        app = App.new(config: config, file: options[:file], done_file: options[:done_file])
         app.demo! if options[:demo]
         options[:snapshot] ? snapshot(app, options) : interactive(app)
         app
@@ -54,6 +57,7 @@ module Todotui
           when '--snapshot'           then options[:snapshot] = true
           when '--demo'               then options[:demo] = true
           when /\A--file=(.+)\z/      then options[:file] = Regexp.last_match(1)
+          when /\A--done-file=(.+)\z/ then options[:done_file] = Regexp.last_match(1)
           when /\A--config=(.+)\z/    then options[:config] = Regexp.last_match(1)
           when /\A--theme=(\w+)\z/    then options[:theme] = Regexp.last_match(1)
           when /\A--w=(\d+)\z/        then options[:w] = Regexp.last_match(1).to_i
