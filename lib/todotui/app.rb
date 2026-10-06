@@ -338,7 +338,7 @@ module Todotui
       task = selected_task
       return flash('No task selected') unless task
 
-      index = @tasks.index(task)
+      index = @tasks.index { |candidate| candidate.equal?(task) }
       @tasks.delete_at(index)
       @undo = { task: task, index: index }
       persist
