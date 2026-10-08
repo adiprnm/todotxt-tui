@@ -4,19 +4,25 @@ A terminal UI for the [todo.txt](https://github.com/todotxt/todo.txt) format,
 built on [ruby-tui](https://github.com/adiprnm/ruby-tui).
 
 ```
-╭  todotui  ───────────────────────────────────────────────────────────────────────────────────────╮
-│Filter  text, +project, @context…                 ( ) All  (•) Open  ( ) Done      6 open · 1 done│
-│╭ Tasks ─────────────────────────────────────── 6 shown · smart ╮╭ Details ──────────────── open ╮│
-││     P  DUE          TASK                + / @                 ││Line      (A) 2026-09-27 Pay   ││
-││───────────────────────────────────────────────────────────────││          the electricity bill ││
-││    (A) 2026-10-08   Pay the electricit… +home                 ││          +home due:2026-10-08 ││
-││    (B) 2026-10-16   Ship the todo.txt … +work @laptop         ││Status    open                 ││
-││    (C) 2026-10-26   Plan the weekend t… +travel @home         ││Priority  (A)                  ││
-││        2026-10-06 • Buy milk and eggs … +errands @market      ││Created   2026-09-27           ││
-││                     Back up laptop t:2… +maintenance @laptop  ││Completed —                    ││
-││                     Read the todo.txt … +reading              ││Due       2026-10-08 (in 2d)   ││
-│╰───────────────────────────────────────────────────────────────╯╰───────────────────────────────╯│
-│Demo data (not saved)                                                                             │
+╭  todotui  ─────────────────────────────────────────────────────────────────────────── ~/.todotxt ╮
+│Filter  text, +project, @context…                                    ( ) All  (•) Open  ( ) Done  │
+│╭ Tasks ─────────────────────────────────────── 6 shown   smart ╮╭ Details ──────────────── open ╮│
+││       P  DUE          TASK              + / @                 ││(A) 2026-09-28 Pay the         ││
+││───────────────────────────────────────────────────────────────││electricity bill +home         ││
+││▌     (A) 2026-10-09   Pay the electric… +home                 ││due:2026-10-09                 ││
+││▌     (B) 2026-10-17   Ship the todo.tx… +work @laptop         ││                               ││
+││▌     (C) 2026-10-27   Plan the weekend… +travel @home         ││                               ││
+││          2026-10-07 • Buy milk and eggs +errands @market      ││Status     open                ││
+││                       Back up laptop    +maintenance @laptop  ││Priority   (A)                 ││
+││                       Read the todo.tx… +reading              ││Created    2026-09-28          ││
+││                                                               ││Completed  —                   ││
+││                                                               ││Due        2026-10-09 (in 2d)  ││
+││                                                               ││Projects   +home               ││
+││                                                               ││Contexts   —                   ││
+││                                                               ││Meta       —                   ││
+││                                                               ││                               ││
+╰───────────────────────────────────────────────────────────────╯╰───────────────────────────────╯│
+│Demo data (not saved)                                                               6 open  1 done│
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
@@ -108,7 +114,8 @@ todotui carries its own part: calendar math goes through
 prefix field with a separate statement (Spinel drops the setter half of a
 chained `rest, task.attr = helper(...)`, which used to lose priorities and
 dates when reading a file), and the entry point is `bin/todotui.spinel.rb`
-rather than the Bundler wrapper.
+rather than the Bundler wrapper. The clipboard writes through `system` and a
+`printf` pipe instead of `open3`, which Spinel does not provide.
 
 ## Where todo.txt lives
 
@@ -165,10 +172,19 @@ x 2024-02-02 2024-01-01 Call mom +family @phone
 * `key:value` metadata such as `due:`, `t:` and `rec:`
 * lines that are not touched round-trip byte for byte
 
-The app derives a **due** column from `due:`, flags overdue tasks with `!` and
-tasks due today with `•`, and counts open vs. done in the toolbar. Every
-priority `A`..`Z` gets its own colour: the whole task line is tinted, and
-the details panel shows the priority in the same colour.
+The DUE column is derived from `due:` (with `!` for overdue and `•` for due
+today), and the `+ / @` column keeps projects and contexts in view. The TASK
+cell itself shows only the bare task name: `+project`, `@context` and
+`key:value` metadata are stripped from the row text. Priority is a colour tab in
+the left gutter plus a tinted `(A)` badge.
+
+The selection panel shows the full todo.txt line with its grammar highlighted —
+priority, dates, `+project`, `@context` and `key:value` metadata each get a
+colour of their own — and the status row counts open, overdue and done tasks.
+
+The chrome uses a single warm accent (amber) over cool graphite. Run
+`todotui --theme=plain` for an attributes-only variant that leaves every colour
+to the terminal.
 
 ## Keys
 
@@ -178,17 +194,23 @@ the details panel shows the priority in the same colour.
 | `space` | complete / reopen the selected task |
 | `enter` / `e` | edit the selected task |
 | `d` | delete (then `u` undoes it) |
+| `y` | copy the task name (no priority, tags or dates) |
 | `u` | undo the last delete |
 | `j` / `k`, arrows | move the selection |
 | `s` | cycle the sort: smart, due, priority, a-z, created, completed |
 | `/` | jump to the filter |
 | `,` | settings (where `todo.txt` lives) |
 | `A` | archive completed tasks to the configured `done.txt` |
+| `?` | show the key list |
 | `esc` | cancel a dialog / clear the filter |
 | `q` / `ctrl-c` | quit |
 
 Inside a dialog: `enter` saves, `tab` moves between fields, `esc` cancels.
 `ctrl-c` quits even while a text field has the focus.
+
+`y` hands the bare task name to the system clipboard through the first of
+`wl-copy` (Wayland), `xclip`/`xsel` (X11) or `pbcopy` (macOS) that works;
+priority, dates, `+project`, `@context` and `key:value` metadata are left out.
 
 ## Tests
 
@@ -196,7 +218,7 @@ Inside a dialog: `enter` saves, `tab` moves between fields, `esc` cancels.
 bundle exec ruby test/run.rb
 ```
 
-49 tests cover the parser and round-tripping, the file store, the config
+61 tests cover the parser and round-tripping, the file store, the config
 precedence, filtering/sorting, the app's add/complete/delete/undo/settings
 flows, layout at several terminal sizes, and one end-to-end session typed
 through a real pty.
@@ -210,13 +232,17 @@ todotui.rb              same, as a plain script
 lib/todotui.rb          requires everything
 lib/todotui/
   version.rb
+  theme.rb              the amber-over-graphite palette and todo.txt styles
   calendar.rb           date helpers built on Time (works under Spinel)
   task.rb               todo.txt line <-> Task, projects/contexts/metadata
   store.rb              load/save/archive a todo.txt file
   config.rb             the config file and path precedence
   query.rb              filtering and sorting
+  rich_label.rb         a one-line label built from styled segments
+  field_row.rb          a label/value row that wraps in the width it gets
+  source_view.rb        the details hero: a highlighted todo.txt line
   app.rb                the widget tree and behaviour
-  table.rb              the task table, with a colour per priority
+  table.rb              the task table: priority tab, stripped names, tags
   cli.rb                options, the interactive loop, --snapshot
 test/                   minitest suite
 ```

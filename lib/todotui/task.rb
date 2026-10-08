@@ -132,6 +132,14 @@ module Todotui
       @body.empty? ? to_s : @body
     end
 
+    # The bare task name: the body with +projects, @contexts and key:value
+    # metadata removed, so a compact list can show just the words. If a task
+    # is nothing but tags the original body is kept, so no row goes blank.
+    def title
+      name = words.reject { |word| tag?(word) }.join(' ')
+      name.empty? ? @body : name
+    end
+
     # --- serialisation ----------------------------------------------------
 
     def to_s
@@ -158,6 +166,13 @@ module Todotui
     end
 
     private
+
+    # True for a word the list hides: a +project, an @context or key:value.
+    def tag?(word)
+      return true if word.length > 1 && (word.start_with?('+') || word.start_with?('@'))
+
+      !META_RE.match(word).nil?
+    end
 
     def normalize_priority(value)
       letter = value.to_s.strip.upcase.gsub(/[()]/, '')

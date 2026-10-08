@@ -76,6 +76,15 @@ class TaskTest < Minitest::Test
     refute Todotui::Task.new(completed: true, body: "done due:#{today - 5}").overdue?
   end
 
+  def test_title_strips_tags_and_metadata
+    task = Todotui::Task.parse('(A) 2024-04-01 Pay the bill +home @kitchen due:2024-04-10 rec:1w')
+
+    assert_equal 'Pay the bill', task.title
+    assert_equal 'Call mom', Todotui::Task.new(body: 'Call mom').title
+    assert_equal '+home @phone', Todotui::Task.new(body: '+home @phone').title,
+                 'a task that is only tags keeps its body'
+  end
+
   def test_email_addresses_are_not_contexts
     task = Todotui::Task.new(body: 'mail me at foo@example.com +work')
 

@@ -18,7 +18,8 @@ class AppTest < Minitest::Test
 
       assert_includes text, 'todotui'
       assert_includes text, 'Pay the bill'
-      assert_includes text, '2 open · 1 done'
+      assert_includes text, '2 open'
+      assert_includes text, '1 done'
       assert_equal 2, app.tasks.length - 1, 'the completed task is loaded too'
     end
   end
@@ -80,6 +81,30 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_copying_a_task_copies_only_its_name
+    Dir.mktmpdir('todotui') do |dir|
+      app = app_with(dir, ['(A) 2024-04-01 Pay the bill +home @kitchen due:2024-04-10'])
+      clipboard = FakeClipboard.new
+      app.clipboard = clipboard
+
+      app.copy_selected
+
+      assert_equal 'Pay the bill', clipboard.copied
+      assert_includes app.instance_variable_get(:@status_label).text, 'Copied: Pay the bill'
+    end
+  end
+
+  def test_copying_without_a_clipboard_tool_points_at_the_fix
+    Dir.mktmpdir('todotui') do |dir|
+      app = app_with(dir, ['Buy milk'])
+      app.clipboard = FakeClipboard.new(nil)
+
+      app.copy_selected
+
+      assert_includes app.instance_variable_get(:@status_label).text, 'No clipboard tool'
+    end
+  end
+
   def test_archiving_moves_completed_tasks_out
     Dir.mktmpdir('todotui') do |dir|
       app = app_with(dir, ['open one', 'x 2024-04-01 done two'])
@@ -132,9 +157,15 @@ class AppTest < Minitest::Test
       app = app_with(dir, ["late due:#{Date.today - 3}", "soon due:#{Date.today + 3}"])
 
       assert app.tasks.find { |t| t.overdue? }
-      text = screen_text(app.root)
-      assert_includes text, '!'
-      assert_includes (app.instance_variable_get(:@details).values.map(&:text).join(' ')), 'overdue'
+      details = app.instance_variable_get(:@details).values.map(&:text).join(' ')
+      assert_includes details, 'overdue'
+
+      # The TASK cell is just the name, but the DUE cell still flags it and
+      # the status rail counts the overdue one.
+      table = app.instance_variable_get(:@table)
+      assert_equal ['late', 'soon'], table.rows.map { |row| row[:text] }
+      assert_includes table.rows.first[:due], '!'
+      assert_includes screen_text(app.root), '1 overdue'
     end
   end
 
@@ -177,6 +208,17 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_the_list_strips_tags_from_the_task_cell_only
+    Dir.mktmpdir('todotui') do |dir|
+      app = app_with(dir, SAMPLE)
+      table = app.instance_variable_get(:@table)
+
+      assert_equal %i[flag done pri due text meta], table.columns.map(&:key)
+      assert_equal ['Pay the bill', 'Buy milk and eggs'], table.rows.map { |row| row[:text] }
+      assert_equal ['+home', '+errands @market'], table.rows.map { |row| row[:meta] }
+    end
+  end
+
   def test_narrow_terminals_drop_the_meta_column
     Dir.mktmpdir('todotui') do |dir|
       app = app_with(dir, SAMPLE)
@@ -199,6 +241,42 @@ class AppTest < Minitest::Test
       assert reachable.length.positive?
       refute_includes reachable, app.instance_variable_get(:@table),
                       'the list behind the modal cannot take the focus'
+    end
+  end
+
+  def test_s_cycles_the_app_sort_even_while_the_list_has_focus
+    Dir.mktmpdir('todotui') do |dir|
+      app = app_with(dir, SAMPLE)
+      ui = TUI::App.new(app.root, out: StringIO.new, size: [100, 30])
+      app.attach(ui)
+      app.focus_list
+      ui.on_key('s') { app.cycle_sort }
+
+      assert_equal 0, app.instance_variable_get(:@sort_index)
+
+      ui.send(:dispatch, TUI::Key.printable('s'))
+
+      assert_equal 1, app.instance_variable_get(:@sort_index),
+                   'the focused table must not swallow the sort key'
+      assert_includes app.instance_variable_get(:@status_label).text, 'Sort: due'
+    end
+  end
+
+  def test_the_help_overlay_lists_the_keys_and_toggles
+    Dir.mktmpdir('todotui') do |dir|
+      app = app_with(dir, SAMPLE)
+      refute app.overlay_shown?
+
+      app.open_help
+      assert app.overlay_shown?
+      text = screen_text(app.root)
+      assert_includes text, 'Keys'
+      assert_includes text, 'add a task'
+      assert_includes text, 'copy the task name'
+      assert_includes text, 'archive completed tasks'
+
+      app.open_help
+      refute app.overlay_shown?, '? closes the help again'
     end
   end
 
@@ -238,7 +316,7 @@ class AppTest < Minitest::Test
     assert_equal :text, Todotui::TaskTable.priority_style(nil)
   end
 
-  def test_the_priority_colour_tints_the_whole_row
+  def test_the_priority_colour_marks_the_tab_and_badge
     Dir.mktmpdir('todotui') do |dir|
       app = app_with(dir, ['(A) first task', '(B) second task'])
       ui = TUI::App.new(app.root, out: StringIO.new, size: [100, 30])
@@ -246,9 +324,25 @@ class AppTest < Minitest::Test
       app.resize(100, 30)
       line = ui.render_lines.find { |l| l.include?('second task') }
 
-      color = Todotui::TaskTable.priority_style('B')
-      assert_includes line, "#{color}(B)", 'the priority badge is tinted'
-      assert_includes line, "#{color}second task", 'the task text is tinted too'
+      bold = Todotui::TaskTable.priority_style('B', bold: true)
+      tab = TUI::Style.fg(Todotui::TaskTable.priority_color('B').to_i)
+      assert_includes line, "#{tab}▌", 'the gutter tab is tinted'
+      assert_includes line, "#{bold}(B)", 'the priority badge is tinted'
+      refute_includes line, "#{bold}second task", 'the task text stays neutral'
     end
+  end
+end
+
+# Stands in for Todotui::Clipboard so a test can see what would be copied.
+class FakeClipboard
+  attr_reader :copied
+
+  def initialize(result = ['wl-copy'])
+    @result = result
+  end
+
+  def copy(text)
+    @copied = text
+    @result
   end
 end

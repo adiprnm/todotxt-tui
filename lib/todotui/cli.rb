@@ -34,14 +34,15 @@ module Todotui
         TODOTXT_DONE_FILE   path to done.txt
 
       keys:
-        a add · space complete · enter edit · d delete · u undo
-        j/k or arrows move · s sort · / filter · , settings · q quit
+        a add · space complete · enter edit · d delete · y copy name
+        j/k or arrows move · s sort · / filter · , settings
+        ? keys · A archive · u undo · q quit
     TEXT
 
     class << self
       def run(argv)
         options = parse(argv)
-        TUI::Theme.install(options[:theme]) if options[:theme]
+        Todotui::Theme.install(options[:theme] || :dark)
 
         config = Config.new(path: options[:config] || Config.default_path)
         app = App.new(config: config, file: options[:file], done_file: options[:done_file])
@@ -96,18 +97,21 @@ module Todotui
         ui.on_key('e') { app.open_editor(app.selected_task) }
         ui.on_key(' ') { app.toggle_selected }
         ui.on_key('d') { app.delete_selected }
+        ui.on_key('y') { app.copy_selected }
         ui.on_key('u') { app.undo_delete }
         ui.on_key('j') { app.move_selection(1) }
         ui.on_key('k') { app.move_selection(-1) }
         ui.on_key('s') { app.cycle_sort }
         ui.on_key('A') { app.archive_done }
         ui.on_key(',') { app.open_settings }
+        ui.on_key('?') { app.open_help }
         ui.on_key('/') { app.focus_filter }
         ui.on_key(:escape) { app.cancel }
         ui.on_key(:left) { app.move_selection(-1) }
         ui.on_key(:right) { app.move_selection(1) }
 
         ui.on_resize { |cols, rows| app.resize(cols, rows) }
+        ui.every(0.5) { app.expire_flash }
         app.resize(*ui.size)
         app.focus_list
         ui.run

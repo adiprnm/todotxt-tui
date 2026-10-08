@@ -1,6 +1,19 @@
+# Bundler
 /.bundle
 /vendor/bundle
 *.gem
-.DS_Store
-/tmp
+
+# Spinel build output
 /tt
+/out
+
+# Editors and tooling
+.ruby-lsp/
+*.swp
+*~
+
+# OS
+.DS_Store
+
+# Scratch
+/tmp

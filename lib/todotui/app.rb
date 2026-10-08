@@ -7,6 +7,9 @@ require_relative 'store'
 require_relative 'config'
 require_relative 'query'
 require_relative 'table'
+require_relative 'rich_label'
+require_relative 'field_row'
+require_relative 'source_view'
 
 module Todotui
   # The application widget tree and its behaviour. All of the todo.txt
@@ -23,16 +26,32 @@ module Todotui
       [:completed, 'completed']
     ].freeze
 
+    # How long a flash message stays before the key hint returns.
+    FLASH_SECONDS = 4.0
+
+    # The status row shows a live key hint, which a flash message replaces
+    # for a few seconds (see #flash / #expire_flash).
     HINTS = {
-      main:     ' a add · space done · enter edit · d delete · u undo · j/k move · s sort · / filter · , settings · q quit ',
-      editor:   ' enter save · tab next · esc cancel ',
-      settings: ' enter save · esc cancel '
+      status:   'a add   space done   d delete   y copy   u undo   / filter   ? help   q quit',
+      editor:   'enter save   tab next   esc cancel',
+      settings: 'enter save   esc cancel',
+      help:     'esc or ? to close'
     }.freeze
+
+    # Panes in @dialogs, in the order they are added.
+    EDITOR_PANE   = 0
+    SETTINGS_PANE = 1
+    HELP_PANE     = 2
 
     attr_reader :root, :tasks, :config, :store
 
+    # Injectable so a test can capture the copied text without a desktop
+    # clipboard; production always uses Todotui::Clipboard.
+    attr_accessor :clipboard
+
     def initialize(config: Config.new, file: nil, done_file: nil)
       @config = config
+      @clipboard = Clipboard
       todo = @config.resolve(file)
       @store = Store.new(todo, done_path: @config.resolve_done(done_file, todo: todo))
       @tasks = []
@@ -43,6 +62,7 @@ module Todotui
       @undo = nil
       @editing = nil
       @demo = false
+      @flash_until = nil
 
       build_ui
       flash("Loaded #{@tasks.length} task(s) from #{@store.path}") if reload_tasks
@@ -73,7 +93,9 @@ module Todotui
     # ------------------------------------------------------------------ UI
 
     def build_ui
-      @root = TUI::Layout::Box.new(title: ' todotui ', footer: HINTS[:main])
+      # Note: no footer. ruby-tui's border label draws the footer on the top
+      # edge, next to the title, so the key hint lives in the status row.
+      @root = TUI::Layout::Box.new(title: ' todotui ', title_right_style: :brand_path)
 
       body = TUI::Layout::Stack.new(direction: :vertical)
       body.add(build_toolbar, size: TUI.fixed(1))
@@ -83,6 +105,7 @@ module Todotui
       @dialogs = TUI::Panes.new
       @dialogs.add(build_editor)
       @dialogs.add(build_settings)
+      @dialogs.add(build_help)
 
       @overlay = TUI::Layout::Overlay.new(body, @dialogs)
       @overlay.hide
@@ -107,9 +130,6 @@ module Todotui
         refresh_tasks
       end
       row.add(@scope_radio, size: TUI.auto)
-
-      @counts = TUI::Label.new('', style: :muted, align: :right)
-      row.add(@counts, size: TUI.fixed(18))
       row
     end
 
@@ -127,12 +147,14 @@ module Todotui
       columns
     end
 
-    # The projects/contexts column is the first thing to go when the terminal
-    # is narrow: the details panel still shows it, and dropping it keeps the
-    # fixed columns from crowding the task text.
+    # The TASK cell holds the bare task name (tags stripped); the `+ / @`
+    # column keeps the projects and contexts visible, and the DUE column the
+    # due date. The meta column is the first to go when the terminal is
+    # narrow; the details panel still shows it.
     def columns_for(width)
       columns = [
-        { key: :done, header: '',    width: 3 },
+        { key: :flag, header: '',    width: 2 },
+        { key: :done, header: '',    width: 2 },
         { key: :pri,  header: 'P',   width: 3, align: :center },
         { key: :due,  header: 'DUE', width: 12 },
         { key: :text, header: 'TASK', width: TUI.flex(1) }
@@ -154,28 +176,39 @@ module Todotui
       stack = TUI::Layout::Stack.new(direction: :vertical)
       @details = {}
 
-      [['Line', :line], ['Status', :status], ['Priority', :priority],
-       ['Created', :created], ['Completed', :completed], ['Due', :due],
-       ['Projects', :projects], ['Contexts', :contexts], ['Meta', :meta]].each do |label, key|
-        row = TUI::Layout::Stack.new(direction: :horizontal)
-        row.add(TUI::Label.new(label, style: :label), size: TUI.fixed(10))
-        value = TUI::Label.new('', style: :value, wrap: true)
-        @details[key] = value
-        row.add(value, size: TUI.flex(1))
-        stack.add(row, size: TUI.auto)
+      # The hero: the task's own todo.txt line, highlighted token by token.
+      # Fixed height keeps the field list below it from being pushed off.
+      @source = SourceView.new('', style: :text)
+      @details[:line] = @source
+      stack.add(@source, size: TUI.fixed(4))
+      stack.add(TUI::Label.new(''), size: TUI.fixed(1))
+
+      fields = TUI::Layout::Stack.new(direction: :vertical)
+      [['Status', :status], ['Priority', :priority], ['Created', :created],
+       ['Completed', :completed], ['Due', :due], ['Projects', :projects],
+       ['Contexts', :contexts], ['Meta', :meta]].each do |label, key|
+        row = FieldRow.new(label, label_width: 11)
+        @details[key] = row
+        fields.add(row, size: TUI.auto)
       end
+      stack.add(fields, size: TUI.flex(1))
 
       @details_box.add(stack)
       @details_box
     end
 
     def build_status
-      @status_label = TUI::Label.new('', style: :muted)
-      @status_label
+      row = TUI::Layout::Stack.new(direction: :horizontal, gap: 2)
+      @status_label = TUI::Label.new(HINTS[:status], style: :muted)
+      row.add(@status_label, size: TUI.flex(1))
+
+      @docket = RichLabel.new([], align: :right)
+      row.add(@docket, size: TUI.auto)
+      row
     end
 
     def build_editor
-      @editor_box = TUI::Layout::Box.new(title: 'New task')
+      @editor_box = TUI::Layout::Box.new(title: 'New task', title_right: HINTS[:editor])
       stack = TUI::Layout::Stack.new(direction: :vertical)
 
       @editor_form = TUI::Form.new(label_width: 9)
@@ -205,7 +238,7 @@ module Todotui
     end
 
     def build_settings
-      @settings_box = TUI::Layout::Box.new(title: 'Settings')
+      @settings_box = TUI::Layout::Box.new(title: 'Settings', title_right: HINTS[:settings])
       stack = TUI::Layout::Stack.new(direction: :vertical)
 
       @settings_form = TUI::Form.new(label_width: 12)
@@ -238,6 +271,39 @@ module Todotui
       @settings_box
     end
 
+    # The full key list, one row per binding. Keys are padded so the
+    # descriptions line up; RichLabel paints the key and the description in
+    # different styles and measures to its natural width, so the dialog
+    # stays compact in the middle of the screen.
+    def build_help
+      @help_box = TUI::Layout::Box.new(title: 'Keys', title_right: HINTS[:help], padding: 1)
+      rows = [
+        ['a',          'add a task'],
+        ['space',      'complete / reopen the selected task'],
+        ['enter, e',   'edit the selected task'],
+        ['d',          'delete the selected task (u undoes it)'],
+        ['y',          'copy the task name (no priority, tags or dates)'],
+        ['u',          'undo the last delete'],
+        ['j / k',      'move the selection (arrow keys work too)'],
+        ['s',          'cycle the sort: smart, due, priority, a-z…'],
+        ['/',          'jump to the filter'],
+        [',',          'settings: where todo.txt lives'],
+        ['A',          'archive completed tasks to done.txt'],
+        ['?',          'show this help'],
+        ['esc',        'cancel a dialog / clear the filter'],
+        ['q, ctrl-c',  'quit']
+      ]
+      width = rows.map { |key, _desc| key.length }.max
+
+      stack = TUI::Layout::Stack.new(direction: :vertical)
+      rows.each do |key, desc|
+        row = RichLabel.new([["#{key.ljust(width)}  ", :accent], [desc, :value]], gap: 0)
+        stack.add(row, size: TUI.fixed(1))
+      end
+      @help_box.add(stack)
+      @help_box
+    end
+
     # --------------------------------------------------------------- actions
 
     def open_editor(task = nil)
@@ -250,7 +316,7 @@ module Todotui
       @editor_form.fields.each { |field| field.error = nil }
       refresh_preview
 
-      show_overlay(0, HINTS[:editor])
+      show_overlay(EDITOR_PANE)
       @ui.focus(@f_body.editor) if @ui
       self
     end
@@ -286,7 +352,7 @@ module Todotui
       @settings_saved.text = @config.done_file ? @config.done_file : '(done.txt next to todo.txt)'
       @settings_form.fields.each { |field| field.error = nil }
 
-      show_overlay(1, HINTS[:settings])
+      show_overlay(SETTINGS_PANE)
       @ui.focus(@f_file.editor) if @ui
       self
     end
@@ -313,11 +379,28 @@ module Todotui
       self
     end
 
+    # Toggle the key list. It has no focusable children, so the overlay
+    # drops the focus and the global bindings stay live while it is up.
+    def open_help
+      if overlay_shown?
+        hide_overlay
+      else
+        clear_undo
+        show_overlay(HELP_PANE)
+      end
+      self
+    end
+
     def cancel
       if overlay_shown?
-        @editing = nil
-        hide_overlay
-        flash('Cancelled')
+        # Closing the help dialog needs no flash -- nothing was cancelled.
+        if @dialogs.active == HELP_PANE
+          hide_overlay
+        else
+          @editing = nil
+          hide_overlay
+          flash('Cancelled')
+        end
       elsif @filter.to_s.empty?
         @ui.focus(@table) if @ui
       else
@@ -351,6 +434,21 @@ module Todotui
       persist
       refresh
       flash("Deleted: #{task.summary}  (u to undo)")
+      self
+    end
+
+    # Copy the bare task name -- no priority, dates, +projects, @contexts or
+    # key:value metadata -- to the system clipboard.
+    def copy_selected
+      task = selected_task
+      return flash('No task selected') unless task
+
+      name = task.title
+      if @clipboard.copy(name)
+        flash("Copied: #{name}")
+      else
+        flash('No clipboard tool found (install wl-copy, xclip or xsel)')
+      end
       self
     end
 
@@ -434,7 +532,6 @@ module Todotui
 
     def refresh
       refresh_tasks
-      @root.footer = overlay_shown? ? HINTS[:editor] : HINTS[:main]
       self
     end
 
@@ -443,16 +540,25 @@ module Todotui
       visible = Query.sort(visible, SORT_MODES[@sort_index].first)
       @table.set_rows(visible.map { |task| row_for(task) })
       @table_box.title_right =
-        "#{visible.length} shown · #{SORT_MODES[@sort_index].last}"
+        "#{visible.length} shown   #{SORT_MODES[@sort_index].last}"
 
       open = @tasks.count { |task| !task.completed }
-      @counts.text = "#{open} open · #{@tasks.length - open} done"
+      done = @tasks.length - open
+      overdue = @tasks.count { |task| !task.completed && task.overdue? }
+      segments = [["#{open} open", :value]]
+      segments << ["#{overdue} overdue", :overdue] if overdue.positive?
+      segments << ["#{done} done", :success]
+      @docket.segments = segments
+
+      @root.title_right = display_path(@store.path)
 
       if @table.selected_row
         show_details(@table.selected_row[:task])
       else
         show_details(nil)
-        @details[:line].text = @tasks.empty? ? 'No tasks yet — press a to add one.' : 'No task matches the filter.'
+        @details[:status].text =
+          @tasks.empty? ? 'No tasks yet — press a to add one.' : 'No task matches the filter.'
+        @details[:status].style = :muted
       end
       self
     end
@@ -464,17 +570,32 @@ module Todotui
         return
       end
 
-      @details[:line].text = task.to_s
+      @source.text = task.to_s
+
       @details[:status].text = task.completed ? 'completed' : 'open'
+      @details[:status].style = task.completed ? :done : :success
+
       @details[:priority].text = task.priority ? "(#{task.priority})" : '—'
-      @details[:priority].style = task.priority ? TaskTable.priority_style(task.priority) : :value
+      @details[:priority].style =
+        task.priority ? TaskTable.priority_style(task.priority, bold: true) : :muted
+
       @details[:created].text = task.creation_date || '—'
+      @details[:created].style = task.creation_date ? :date : :muted
       @details[:completed].text = task.completion_date || '—'
+      @details[:completed].style = task.completion_date ? :date : :muted
+
       @details[:due].text = due_detail(task)
+      @details[:due].style = due_detail_style(task)
+
       @details[:projects].text = list_or_dash(task.projects.map { |p| "+#{p}" })
+      @details[:projects].style = task.projects.empty? ? :muted : :project
       @details[:contexts].text = list_or_dash(task.contexts.map { |c| "@#{c}" })
+      @details[:contexts].style = task.contexts.empty? ? :muted : :context
+
       meta = task.metadata.reject { |key, _value| key == 'due' }
       @details[:meta].text = list_or_dash(meta.map { |key, value| "#{key}:#{value}" })
+      @details[:meta].style = meta.empty? ? :muted : :meta
+
       @details_box.title_right = task.completed ? 'done' : 'open'
     end
 
@@ -484,7 +605,7 @@ module Todotui
         done: task.completed ? '✓' : '',
         pri: task.priority ? "(#{task.priority})" : '',
         due: due_cell(task),
-        text: task.body,
+        text: task.title,
         meta: (task.projects.map { |p| "+#{p}" } + task.contexts.map { |c| "@#{c}" }).join(' ')
       }
     end
@@ -564,19 +685,31 @@ module Todotui
       due
     end
 
+    def due_detail_style(task)
+      return :muted unless task.due_date
+      return :done if task.completed
+      return :overdue if task.overdue?
+      return :due_today if task.today?
+
+      :date
+    end
+
+    def display_path(path)
+      home = Dir.home
+      path.to_s.start_with?(home) ? "~#{path[home.length..-1]}" : path.to_s
+    end
+
     def list_or_dash(list)
       list.empty? ? '—' : list.join(' ')
     end
 
-    def show_overlay(index, footer)
+    def show_overlay(index)
       @dialogs.set_active(index)
       @overlay.show
-      @root.footer = footer
     end
 
     def hide_overlay
       @overlay.hide
-      @root.footer = HINTS[:main]
       # Returning the focus to the list keeps j/k/q working right after a
       # dialog closes.
       @ui.focus(@table) if @ui
@@ -601,8 +734,23 @@ module Todotui
       @undo = nil
     end
 
+    # Show a message in the status row. It replaces the key hint for a few
+    # seconds, then #expire_flash puts the hint back (the interactive loop
+    # ticks it; a snapshot simply keeps the message).
     def flash(message)
       @status_label.text = message
+      @status_label.style = :value
+      @flash_until = Time.now.to_f + FLASH_SECONDS
+      self
+    end
+
+    def expire_flash
+      return self unless @flash_until
+      return self if Time.now.to_f < @flash_until
+
+      @flash_until = nil
+      @status_label.text = HINTS[:status]
+      @status_label.style = :muted
       self
     end
   end

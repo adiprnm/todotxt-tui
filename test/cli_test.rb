@@ -72,4 +72,42 @@ class CliTest < Minitest::Test
       refute_includes plain(out), 'pingping', 'keys are not echoed'
     end
   end
+
+  def test_the_help_key_lists_bindings_in_a_real_terminal
+    Dir.mktmpdir('todotui') do |dir|
+      file = File.join(dir, 'todo.txt')
+      config = File.join(dir, 'config')
+      root = File.expand_path('..', __dir__)
+      script = File.join(root, 'bin', 'todotui')
+
+      out = +''
+      status = nil
+      PTY.spawn(RbConfig.ruby, script, "--file=#{file}", "--config=#{config}") do |reader, writer, pid|
+        drain = Thread.new do
+          loop { out << reader.readpartial(65_536) }
+        rescue EOFError, Errno::EIO
+        end
+
+        sleep 1.2
+        writer.print('?')
+        writer.flush
+        sleep 0.8
+        writer.print('q')
+        writer.flush
+
+        begin
+          Timeout.timeout(10) { _, status = Process.wait2(pid) }
+        rescue Timeout::Error
+          Process.kill('KILL', pid)
+          status = nil
+        end
+        drain.join(1)
+      end
+
+      assert status && status.success?, "todotui must exit cleanly (got #{status.inspect})"
+      text = plain(out)
+      assert_includes text, 'add a task'
+      assert_includes text, 'archive completed tasks'
+    end
+  end
 end
