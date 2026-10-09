@@ -176,7 +176,9 @@ The DUE column is derived from `due:` (with `!` for overdue and `•` for due
 today), and the `+ / @` column keeps projects and contexts in view. The TASK
 cell itself shows only the bare task name: `+project`, `@context` and
 `key:value` metadata are stripped from the row text. Priority is a colour tab in
-the left gutter plus a tinted `(A)` badge.
+the left gutter plus a tinted `(A)` badge. The selected-row cursor bar hugs the
+row: it stops just past the last column with something to show instead of
+running the full width of the panel.
 
 The selection panel shows the full todo.txt line with its grammar highlighted —
 priority, dates, `+project`, `@context` and `key:value` metadata each get a

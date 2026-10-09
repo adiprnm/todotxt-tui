@@ -28,6 +28,35 @@ module TestHelpers
     screen_lines(root, cols, rows).join("\n")
   end
 
+  # Cell indexes on a rendered row whose effective background matches `bg`.
+  # SGR attributes persist across runs, so replay them like a terminal does.
+  def background_cells(line, bg)
+    cells = []
+    index = 0
+    current = nil
+    line.scan(/\e\[([0-9;]*)m|(.)/m) do |code, char|
+      if code
+        nums = code.split(';').reject(&:empty?).map(&:to_i)
+        i = 0
+        while i < nums.length
+          case nums[i]
+          when 0, 49 then current = nil
+          when 48
+            if nums[i + 1] == 5
+              current = nums[i + 2]
+              i += 2
+            end
+          end
+          i += 1
+        end
+      elsif char
+        cells << index if current == bg
+        index += 1
+      end
+    end
+    cells
+  end
+
   # A store-backed app inside a throwaway directory.
   def app_with(dir, lines = [])
     file = File.join(dir, 'todo.txt')

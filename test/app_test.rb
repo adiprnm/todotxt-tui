@@ -331,6 +331,25 @@ class AppTest < Minitest::Test
       refute_includes line, "#{bold}second task", 'the task text stays neutral'
     end
   end
+
+  def test_the_cursor_bar_hugs_the_row_content
+    Dir.mktmpdir('todotui') do |dir|
+      app = app_with(dir, ['(A) Buy milk'])
+      ui = TUI::App.new(app.root, out: StringIO.new, size: [120, 30])
+      app.attach(ui)
+      app.resize(120, 30)
+      app.focus_list
+      selection = TUI::Style.resolve(:selection)
+      line = ui.render_lines.find { |l| l.include?('Buy milk') && l.include?(selection) }
+      refute_nil line, 'the selected row keeps the cursor highlight'
+
+      bg = selection[/48;5;(\d+)/, 1].to_i
+      highlighted = background_cells(line, bg)
+      assert_operator highlighted.min, :<, 10, 'the bar starts at the row'
+      assert_operator highlighted.max, :<, 60,
+                      'the cursor bar stops with the task, not at the panel edge'
+    end
+  end
 end
 
 # Stands in for Todotui::Clipboard so a test can see what would be copied.

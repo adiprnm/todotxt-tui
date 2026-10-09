@@ -57,7 +57,7 @@ module Todotui
       rect = TUI::Rect.new(area.x, area.y + line, area.w, 1)
       selected = index == @selected
       base = selected ? (focused? ? @selected_style : @dim_style) : @style
-      canvas.fill(rect.x, rect.y, rect.w, 1, ' ', base) if selected
+      canvas.fill(rect.x, rect.y, cursor_width(row, rect.w), 1, ' ', base) if selected
 
       task = row[:task]
       @columns.each_with_index do |column, i|
@@ -65,6 +65,20 @@ module Todotui
         draw_cell(canvas, cell, column, row, task, selected, base)
       end
       self
+    end
+
+    # The cursor bar hugs the row's content instead of running the full
+    # width of the panel: it stops one cell after the last column that has
+    # anything to show, so a short task leaves a short bar.
+    def cursor_width(row, limit)
+      width = 1
+      @columns.each_with_index do |column, i|
+        value = column.cell(row, i).to_s
+        next if value.empty?
+
+        width = [column_offset(i) + TUI::Text.width(value), limit].min
+      end
+      [width + 1, limit].min
     end
 
     def draw_cell(canvas, cell, column, row, task, selected, base)
