@@ -134,9 +134,11 @@ The config file is a tiny key=value file under the XDG config directory:
 ```
 $ cat ~/.config/todotui/config
 # todotui configuration
-# where your todo.txt and done.txt live
+# where your todo.txt and done.txt live, and the last filter used
 todo_file=/home/you/work/todo.txt
 done_file=/home/you/work/done.txt
+filter=+work
+scope=Open
 ```
 
 The archive target (`A` key) is configured the same way: `--done-file=PATH`,
@@ -153,6 +155,11 @@ written to that config file, so the next launch opens them — no flags or
 environment variables needed. `Config#resolve` / `Config#resolve_done` are
 the single places the precedence is applied, and they are covered by the
 tests.
+
+The filter is remembered too: whatever text and scope (`All` / `Open` /
+`Done`) you leave the app with are written to the config, so the next launch
+starts on the same view. `esc` clears the filter and that clear state is
+remembered as well.
 
 The file itself is only created when you save your first task, and writes go
 through a temp file + rename, so an interrupted save never truncates it.
@@ -220,7 +227,7 @@ priority, dates, `+project`, `@context` and `key:value` metadata are left out.
 bundle exec ruby test/run.rb
 ```
 
-61 tests cover the parser and round-tripping, the file store, the config
+67 tests cover the parser and round-tripping, the file store, the config
 precedence, filtering/sorting, the app's add/complete/delete/undo/settings
 flows, layout at several terminal sizes, and one end-to-end session typed
 through a real pty.

@@ -5,7 +5,8 @@ require 'fileutils'
 module Todotui
   # The app config: a tiny key=value file kept at
   # $XDG_CONFIG_HOME/todotui/config (or ~/.config/todotui/config). It
-  # remembers where the user's todo.txt and done.txt live.
+  # remembers where the user's todo.txt and done.txt live, plus the filter
+  # (text and scope) the user left the app with.
   class Config
     # Only the namespaced variable is honored. Generic names such as
     # TODO_FILE / TODO_TXT are exported by other todo.txt tools (todo.sh and
@@ -16,8 +17,10 @@ module Todotui
     FILENAME = 'todo.txt'
     DONE_FILENAME = 'done.txt'
 
+    DEFAULT_SCOPE = 'Open'
+
     attr_reader :path
-    attr_accessor :todo_file, :done_file
+    attr_accessor :todo_file, :done_file, :filter, :scope
 
     def self.dir
       base = ENV['XDG_CONFIG_HOME'].to_s
@@ -41,6 +44,8 @@ module Todotui
       @path = File.expand_path(path)
       @todo_file = self.class.default_todo_file
       @done_file = nil
+      @filter = ''
+      @scope = DEFAULT_SCOPE
       load
     end
 
@@ -79,8 +84,12 @@ module Todotui
         key, value = line.split('=', 2)
         next if value.nil?
 
-        @todo_file = value.strip if key.strip == 'todo_file'
-        @done_file = value.strip if key.strip == 'done_file'
+        case key.strip
+        when 'todo_file' then @todo_file = value.strip
+        when 'done_file' then @done_file = value.strip
+        when 'filter' then @filter = value.strip
+        when 'scope' then @scope = value.strip
+        end
       end
       self
     end
@@ -89,8 +98,10 @@ module Todotui
       FileUtils.mkdir_p(File.dirname(@path))
       lines = [
         '# todotui configuration',
-        '# where your todo.txt and done.txt live',
-        "todo_file=#{@todo_file}"
+        '# where your todo.txt and done.txt live, and the last filter used',
+        "todo_file=#{@todo_file}",
+        "filter=#{@filter}",
+        "scope=#{@scope}"
       ]
       lines << "done_file=#{@done_file}" if present?(@done_file)
       File.write(@path, "#{lines.join("\n")}\n")

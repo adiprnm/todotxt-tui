@@ -56,8 +56,8 @@ module Todotui
       @store = Store.new(todo, done_path: @config.resolve_done(done_file, todo: todo))
       @tasks = []
 
-      @filter = ''
-      @scope = 'Open'
+      @filter = @config.filter.to_s
+      @scope = SCOPE_OPTIONS.include?(@config.scope) ? @config.scope : Config::DEFAULT_SCOPE
       @sort_index = 0
       @undo = nil
       @editing = nil
@@ -65,6 +65,10 @@ module Todotui
       @flash_until = nil
 
       build_ui
+      # Put the widgets where the config left them, so the last filter is
+      # on screen from the first frame.
+      @search.value = @filter
+      @scope_radio.select(SCOPE_OPTIONS.index(@scope), notify: false)
       flash("Loaded #{@tasks.length} task(s) from #{@store.path}") if reload_tasks
       refresh
     end
@@ -119,14 +123,17 @@ module Todotui
       @search = TUI::Input.new(placeholder: 'text, +project, @context…', padding: 1)
       @search.on(TUI::Events::CHANGE) do
         @filter = @search.value
+        remember_filter
         refresh_tasks
       end
       row.add(@search, size: TUI.flex(1))
 
-      @scope_radio = TUI::RadioGroup.new(options: SCOPE_OPTIONS, selected: 1,
+      @scope_radio = TUI::RadioGroup.new(options: SCOPE_OPTIONS,
+                                         selected: SCOPE_OPTIONS.index(@scope),
                                          orientation: :horizontal)
       @scope_radio.on(TUI::Events::CHANGE) do |value|
         @scope = value
+        remember_filter
         refresh_tasks
       end
       row.add(@scope_radio, size: TUI.auto)
@@ -368,10 +375,6 @@ module Todotui
 
       @store = Store.new(path, done_path: done)
       loaded = reload_tasks
-      @filter = ''
-      @search.value = ''
-      @scope = 'Open'
-      @scope_radio.select(1)
 
       hide_overlay
       flash("todo.txt is now #{path} (#{@tasks.length} task(s))") if loaded
@@ -719,6 +722,20 @@ module Todotui
       @store.save(@tasks)
     rescue StandardError => e
       flash("Could not save: #{e.message}")
+    end
+
+    # Keep the filter text and scope in the config, so the next launch opens
+    # exactly where this one left off. The guard keeps widget callbacks that
+    # fire during startup from rewriting an unchanged config.
+    def remember_filter
+      return if @config.filter.to_s == @filter.to_s &&
+                @config.scope.to_s == @scope.to_s
+
+      @config.filter = @filter.to_s
+      @config.scope = @scope.to_s
+      @config.save
+    rescue StandardError => e
+      flash("Could not remember the filter: #{e.message}")
     end
 
     def reload_tasks

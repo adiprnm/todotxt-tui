@@ -152,6 +152,51 @@ class AppTest < Minitest::Test
     end
   end
 
+  def test_the_last_filter_survives_a_restart
+    Dir.mktmpdir('todotui') do |dir|
+      app = app_with(dir, SAMPLE)
+      app.instance_variable_get(:@search).value = '+home'
+      app.instance_variable_get(:@scope_radio).select(0) # All
+
+      assert_equal '+home', app.config.filter
+      assert_equal 'All', app.config.scope
+
+      reopened = Todotui::App.new(config: app.config, file: app.file_path)
+      search = reopened.instance_variable_get(:@search)
+      radio = reopened.instance_variable_get(:@scope_radio)
+      assert_equal '+home', search.value
+      assert_equal 'All', radio.value
+      rows = reopened.instance_variable_get(:@table).rows
+      assert_equal ['Pay the bill'], rows.map { |row| row[:text] }
+    end
+  end
+
+  def test_an_invalid_saved_scope_falls_back_to_open
+    Dir.mktmpdir('todotui') do |dir|
+      app = app_with(dir, SAMPLE)
+      app.config.scope = 'Sideways'
+
+      reopened = Todotui::App.new(config: app.config, file: app.file_path)
+
+      assert_equal 'Open', reopened.instance_variable_get(:@scope_radio).value
+      assert_equal 2, reopened.instance_variable_get(:@table).rows.length
+    end
+  end
+
+  def test_clearing_the_filter_is_remembered_too
+    Dir.mktmpdir('todotui') do |dir|
+      app = app_with(dir, SAMPLE)
+      app.instance_variable_get(:@search).value = '+home'
+      app.instance_variable_get(:@search).value = ''
+
+      assert_equal '', app.config.filter
+
+      reopened = Todotui::App.new(config: app.config, file: app.file_path)
+      assert_equal '', reopened.instance_variable_get(:@search).value
+      assert_equal 2, reopened.instance_variable_get(:@table).rows.length
+    end
+  end
+
   def test_overdue_tasks_are_flagged
     Dir.mktmpdir('todotui') do |dir|
       app = app_with(dir, ["late due:#{Date.today - 3}", "soon due:#{Date.today + 3}"])

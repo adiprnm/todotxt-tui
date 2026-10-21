@@ -104,6 +104,22 @@ class ConfigTest < Minitest::Test
     end
   end
 
+  def test_saves_and_reloads_the_filter
+    Dir.mktmpdir('todotui') do |dir|
+      config = Todotui::Config.new(path: File.join(dir, 'config'))
+      assert_equal '', config.filter
+      assert_equal 'Open', config.scope
+
+      config.filter = '+work @laptop'
+      config.scope = 'Done'
+      config.save
+
+      reloaded = Todotui::Config.new(path: File.join(dir, 'config'))
+      assert_equal '+work @laptop', reloaded.filter
+      assert_equal 'Done', reloaded.scope
+    end
+  end
+
   def test_resolve_done_defaults_to_done_txt_next_to_todo
     Dir.mktmpdir('todotui') do |dir|
       config = Todotui::Config.new(path: File.join(dir, 'config'))
